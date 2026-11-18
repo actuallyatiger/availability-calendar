@@ -44,6 +44,7 @@ export interface EventSummary {
   respondentCount: number;
   respondedByMe: boolean;
   canManage: boolean;
+  pollCount: number;
 }
 
 export interface AvailabilityEntry {
@@ -58,6 +59,42 @@ export interface EventDetail extends EventSummary {
   groups: string[];
   respondents: UserSummary[];
   availability: AvailabilityEntry[];
+  polls: Poll[];
+}
+
+export interface PollOption {
+  id: string;
+  label: string;
+  createdBy: UserSummary;
+  voters: UserSummary[];
+  /** True if the current user may remove this option. */
+  canDelete: boolean;
+}
+
+export interface Poll {
+  id: string;
+  question: string;
+  multiple: boolean;
+  allowSuggestions: boolean;
+  closed: boolean;
+  createdAt: string;
+  options: PollOption[];
+  /** Number of distinct people who voted. */
+  voterCount: number;
+}
+
+export interface PollInput {
+  question: string;
+  multiple: boolean;
+  allowSuggestions: boolean;
+  options: string[];
+}
+
+export interface PollUpdate {
+  question?: string;
+  multiple?: boolean;
+  allowSuggestions?: boolean;
+  closed?: boolean;
 }
 
 export interface EventInput {
@@ -81,7 +118,7 @@ export interface AvailabilityCellInput {
   status: AvailabilityStatus | null;
 }
 
-export type ChangeKind = 'created' | 'updated' | 'availability' | 'archived' | 'deleted';
+export type ChangeKind = 'created' | 'updated' | 'availability' | 'poll' | 'archived' | 'deleted';
 
 export interface ChangeNotification {
   kind: ChangeKind;

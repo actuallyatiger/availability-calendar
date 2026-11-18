@@ -86,6 +86,11 @@ export function EventListPage({ archived = false }: { archived?: boolean }) {
                     {!ev.respondedByMe && <span className="badge badge-accent">Needs your response</span>}
                   </>
                 )}
+                {ev.pollCount > 0 && (
+                  <span className="badge">
+                    {ev.pollCount} {ev.pollCount === 1 ? 'poll' : 'polls'}
+                  </span>
+                )}
                 {ev.visibility === 'restricted' && <span className="badge">Invite only</span>}
               </div>
             </Link>

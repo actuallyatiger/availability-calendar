@@ -6,6 +6,7 @@ import type { ChangeBus, ChangeMessage } from '../bus.js';
 import { canManage, canView, loadEventAccess, type AuthUser, type EventAccess } from '../access.js';
 import { requireUser } from '../auth.js';
 import { newId, nowIso } from '../util.js';
+import { loadPolls } from './polls.js';
 import { isCellInGrid, validateGrid, type GridSpec } from '../../../shared/grid.js';
 import type { EventDetail, EventSummary, UserSummary } from '../../../shared/api.js';
 
@@ -92,7 +93,7 @@ export async function registerEventRoutes(app: FastifyInstance, db: DB, bus: Cha
   async function summarize(user: AuthUser, events: Event[]): Promise<EventSummary[]> {
     if (!events.length) return [];
     const ids = events.map((e) => e.id);
-    const [creators, counts, mine] = await Promise.all([
+    const [creators, counts, mine, polls] = await Promise.all([
       userSummaries(events.map((e) => e.created_by)),
       db
         .selectFrom('availability')
@@ -107,8 +108,15 @@ export async function registerEventRoutes(app: FastifyInstance, db: DB, bus: Cha
         .where('event_id', 'in', ids)
         .where('user_id', '=', user.id)
         .execute(),
+      db
+        .selectFrom('polls')
+        .select(['event_id', (eb) => eb.fn.count<number>('id').as('n')])
+        .where('event_id', 'in', ids)
+        .groupBy('event_id')
+        .execute(),
     ]);
     const countMap = new Map(counts.map((c) => [c.event_id, Number(c.n)]));
+    const pollMap = new Map(polls.map((c) => [c.event_id, Number(c.n)]));
     const mineSet = new Set(mine.map((m) => m.event_id));
     return events.map((e) => ({
       id: e.id,
@@ -129,6 +137,7 @@ export async function registerEventRoutes(app: FastifyInstance, db: DB, bus: Cha
       respondentCount: countMap.get(e.id) ?? 0,
       respondedByMe: mineSet.has(e.id),
       canManage: canManage(user, { createdBy: e.created_by }),
+      pollCount: pollMap.get(e.id) ?? 0,
     }));
   }
 
@@ -222,6 +231,7 @@ export async function registerEventRoutes(app: FastifyInstance, db: DB, bus: Cha
     const respondentIds = [...new Set(availability.map((a) => a.userId))];
     const people = await userSummaries([...respondentIds, ...access.inviteeIds]);
     const [summary] = await summarize(user, [event]);
+    const polls = await loadPolls(db, event.id, user, summary!.canManage);
 
     const detail: EventDetail = {
       ...summary!,
@@ -229,6 +239,7 @@ export async function registerEventRoutes(app: FastifyInstance, db: DB, bus: Cha
       groups: access.groups,
       respondents: respondentIds.map((id) => people.get(id)).filter((u): u is UserSummary => !!u),
       availability,
+      polls,
     };
     return detail;
   });
@@ -375,6 +386,10 @@ export async function registerEventRoutes(app: FastifyInstance, db: DB, bus: Cha
 
     await db.transaction().execute(async (tx) => {
       // Explicit deletes so we don't depend on FK cascade support/config.
+      const pollIds = tx.selectFrom('polls').select('id').where('event_id', '=', found.event.id);
+      await tx.deleteFrom('poll_votes').where('poll_id', 'in', pollIds).execute();
+      await tx.deleteFrom('poll_options').where('poll_id', 'in', pollIds).execute();
+      await tx.deleteFrom('polls').where('event_id', '=', found.event.id).execute();
       await tx.deleteFrom('availability').where('event_id', '=', found.event.id).execute();
       await tx.deleteFrom('event_invitees').where('event_id', '=', found.event.id).execute();
       await tx.deleteFrom('event_groups').where('event_id', '=', found.event.id).execute();
