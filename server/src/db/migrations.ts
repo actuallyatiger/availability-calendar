@@ -127,6 +127,15 @@ const migrations: Record<string, Migration> = {
       }
     },
   },
+
+  '0003_poll_option_url': {
+    async up(db: Kysely<any>) {
+      await db.schema.alterTable('poll_options').addColumn('url', 'text').execute();
+    },
+    async down(db: Kysely<any>) {
+      await db.schema.alterTable('poll_options').dropColumn('url').execute();
+    },
+  },
 };
 
 export const migrationProvider: MigrationProvider = {

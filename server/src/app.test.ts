@@ -18,7 +18,7 @@ async function login(username: string, groups = '') {
   return s.json().user.id as string;
 }
 
-function as(username: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: unknown) {
+function as(username: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, payload?: unknown) {
   return app.inject({ method, url, payload: payload as object, headers: { cookie: cookies[username] ?? '' } });
 }
 
@@ -257,6 +257,44 @@ describe('polls', () => {
     await as('alice', 'PATCH', `/api/polls/${poll.id}`, { closed: true });
     expect((await as('bob', 'PUT', `/api/polls/${poll.id}/votes`, { optionIds: [] })).statusCode).toBe(409);
     await as('alice', 'PATCH', `/api/polls/${poll.id}`, { closed: false });
+  });
+
+  it('stores and validates option links', async () => {
+    const res = await as('alice', 'POST', `/api/events/${ids.public}/polls`, {
+      question: 'Which bar?',
+      multiple: true,
+      allowSuggestions: true,
+      options: [{ label: 'The Crown', url: 'maps.example.com/crown?q=1' }, 'No link pub'],
+    });
+    expect(res.statusCode).toBe(201);
+    const pollId = res.json().id;
+    const find = async () => (await polls('bob')).find((p) => p.id === pollId)!;
+    let p = await find();
+    expect(p.options.map((o) => o.url)).toEqual(['https://maps.example.com/crown?q=1', null]);
+
+    // Unsafe or malformed links are rejected.
+    for (const url of ['javascript:alert(1)', 'data:text/html,hi', 'not a url', 'ftp://example.com/x']) {
+      const r = await as('bob', 'POST', `/api/polls/${pollId}/options`, { label: `Bad ${url}`, url });
+      expect(r.statusCode, url).toBe(400);
+    }
+    expect((await as('bob', 'POST', `/api/polls/${pollId}/options`, { label: 'Bobs bar', url: 'http://bobs.example' })).statusCode).toBe(201);
+    p = await find();
+    const bobs = p.options.find((o) => o.label === 'Bobs bar')!;
+    expect(bobs.url).toBe('http://bobs.example/');
+    expect(bobs.canEdit).toBe(true);
+    const crown = p.options.find((o) => o.label === 'The Crown')!;
+    expect(crown.canEdit).toBe(false);
+
+    // Author or event creator can change a link; others can't.
+    const patch = (u: string, id: string, url: string | null) => as(u, 'PATCH', `/api/polls/${pollId}/options/${id}`, { url });
+    expect((await patch('carol', bobs.id, 'evil.example')).statusCode).toBe(403);
+    expect((await patch('bob', bobs.id, 'https://bobs.example/menu')).statusCode).toBe(200);
+    expect((await patch('alice', crown.id, null)).statusCode).toBe(200);
+    expect((await patch('bob', bobs.id, 'javascript:alert(1)')).statusCode).toBe(400);
+    p = await find();
+    expect(p.options.find((o) => o.id === bobs.id)!.url).toBe('https://bobs.example/menu');
+    expect(p.options.find((o) => o.id === crown.id)!.url).toBeNull();
+    await as('alice', 'DELETE', `/api/polls/${pollId}`);
   });
 
   it('makes polls read-only on archived events and hides them from outsiders', async () => {

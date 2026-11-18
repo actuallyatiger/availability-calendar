@@ -10,11 +10,50 @@ import type { Poll, UserSummary } from '../../../shared/api.js';
 const MAX_OPTIONS = 50;
 const label = z.string().trim().min(1).max(200);
 
+/**
+ * Optional link for an option. Accepts "example.com/x" (https:// is added),
+ * rejects anything that isn't http(s) so links can't run script.
+ * Empty string / null means "no link".
+ */
+export function normalizeUrl(value: string): string | null {
+  const v = value.trim();
+  if (!v) return null;
+  const withScheme = /^[a-z][a-z\d+.-]*:/i.test(v) ? v : `https://${v}`;
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    throw new Error('Link is not a valid URL');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Links must start with http:// or https://');
+  if (!url.hostname.includes('.') && url.hostname !== 'localhost') throw new Error('Link is not a valid URL');
+  return url.href;
+}
+
+const urlField = z
+  .string()
+  .max(2000)
+  .nullable()
+  .optional()
+  .transform((v, ctx) => {
+    if (v == null) return null;
+    try {
+      return normalizeUrl(v);
+    } catch (err) {
+      ctx.addIssue({ code: 'custom', message: (err as Error).message });
+      return z.NEVER;
+    }
+  });
+
+const optionInput = z.object({ label, url: urlField });
+// Plain strings are still accepted for options without a link.
+const optionEntry = z.union([label.transform((l) => ({ label: l, url: null })), optionInput]);
+
 const pollInput = z.object({
   question: z.string().trim().min(1).max(300),
   multiple: z.boolean().default(true),
   allowSuggestions: z.boolean().default(true),
-  options: z.array(label).max(MAX_OPTIONS).default([]),
+  options: z.array(optionEntry).max(MAX_OPTIONS).default([]),
 });
 
 const pollUpdate = z.object({
@@ -24,16 +63,16 @@ const pollUpdate = z.object({
   closed: z.boolean().optional(),
 });
 
-const optionInput = z.object({ label });
+const optionUpdate = z.object({ url: urlField });
 const votesInput = z.object({ optionIds: z.array(z.string().max(64)).max(MAX_OPTIONS) });
 
 /** Case/whitespace-insensitive key used to reject duplicate options. */
 const normalize = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
 
-function dedupe(labels: string[]): string[] {
+function dedupe<T extends { label: string }>(options: T[]): T[] {
   const seen = new Set<string>();
-  return labels.filter((l) => {
-    const k = normalize(l);
+  return options.filter((o) => {
+    const k = normalize(o.label);
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -83,9 +122,11 @@ export async function loadPolls(db: DB, eventId: string, viewer: AuthUser, manag
           return {
             id: o.id,
             label: o.label,
+            url: o.url,
             createdBy: who(o.created_by),
             voters: voterIds.map(who),
             canDelete: !p.closed && (manager || (o.created_by === viewer.id && !othersVoted)),
+            canEdit: !p.closed && (manager || o.created_by === viewer.id),
           };
         }),
     };
@@ -155,12 +196,20 @@ export async function registerPollRoutes(app: FastifyInstance, db: DB, bus: Chan
           created_at: now,
         })
         .execute();
-      const labels = dedupe(input.options);
-      if (labels.length) {
+      const opts = dedupe(input.options);
+      if (opts.length) {
         await tx
           .insertInto('poll_options')
           .values(
-            labels.map((l, position) => ({ id: newId(), poll_id: pollId, label: l, position, created_by: user.id, created_at: now })),
+            opts.map((o, position) => ({
+              id: newId(),
+              poll_id: pollId,
+              label: o.label,
+              url: o.url,
+              position,
+              created_by: user.id,
+              created_at: now,
+            })),
           )
           .execute();
       }
@@ -258,6 +307,7 @@ export async function registerPollRoutes(app: FastifyInstance, db: DB, bus: Chan
         id,
         poll_id: poll.id,
         label: parsed.data.label,
+        url: parsed.data.url,
         position: Math.max(-1, ...existing.map((o) => o.position)) + 1,
         created_by: user.id,
         created_at: nowIso(),
@@ -266,6 +316,33 @@ export async function registerPollRoutes(app: FastifyInstance, db: DB, bus: Chan
     notify(found.access);
     return reply.code(201).send({ id });
   });
+
+  // ------------------------------------------------------------ change option link
+  app.patch<{ Params: { pollId: string; optionId: string } }>(
+    '/api/polls/:pollId/options/:optionId',
+    async (request, reply) => {
+      const user = request.user!;
+      const found = await loadPoll(user, request.params.pollId, reply);
+      if (!found) return;
+      const option = await db
+        .selectFrom('poll_options')
+        .selectAll()
+        .where('id', '=', request.params.optionId)
+        .where('poll_id', '=', found.poll.id)
+        .executeTakeFirst();
+      if (!option) return reply.code(404).send({ error: 'Option not found' });
+      if (found.poll.closed) return reply.code(409).send({ error: 'This poll is closed' });
+      if (!found.manager && option.created_by !== user.id) {
+        return reply.code(403).send({ error: 'Only the person who added this option can change its link' });
+      }
+      const parsed = optionUpdate.safeParse(request.body);
+      if (!parsed.success) return badRequest(reply, parsed.error);
+
+      await db.updateTable('poll_options').set({ url: parsed.data.url }).where('id', '=', option.id).execute();
+      notify(found.access);
+      return { ok: true };
+    },
+  );
 
   // ------------------------------------------------------------ remove option
   app.delete<{ Params: { pollId: string; optionId: string } }>(

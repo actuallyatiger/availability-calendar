@@ -61,6 +61,24 @@ export function Polls({ eventId, polls, userId, organizerId, canManage, readOnly
   );
 }
 
+/** Short display form of a link, e.g. "maps.google.com". */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+function OptionLink({ url }: { url: string }) {
+  return (
+    <a className="poll-link" href={url} target="_blank" rel="noopener noreferrer nofollow ugc" title={url}>
+      <span className="poll-link-host">{hostOf(url)}</span>
+      <span aria-hidden> ↗</span>
+    </a>
+  );
+}
+
 /* ------------------------------------------------------------------ create */
 
 function NewPollForm({
@@ -73,15 +91,19 @@ function NewPollForm({
   onError: (message: string) => void;
 }) {
   const [question, setQuestion] = useState('');
-  const [options, setOptions] = useState<string[]>(['', '']);
+  const [options, setOptions] = useState<{ label: string; url: string }[]>([
+    { label: '', url: '' },
+    { label: '', url: '' },
+  ]);
   const [multiple, setMultiple] = useState(true);
   const [allowSuggestions, setAllowSuggestions] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  function setOption(i: number, value: string) {
-    const next = options.map((o, j) => (j === i ? value : o));
-    // Always keep one empty field at the end to type the next option into.
-    if (i === next.length - 1 && value.trim()) next.push('');
+  function setOption(i: number, field: 'label' | 'url', value: string) {
+    const next = options.map((o, j) => (j === i ? { ...o, [field]: value } : o));
+    // Always keep one empty row at the end to type the next option into.
+    const last = next[next.length - 1]!;
+    if (last.label.trim() || last.url.trim()) next.push({ label: '', url: '' });
     setOptions(next);
   }
 
@@ -93,7 +115,9 @@ function NewPollForm({
         question,
         multiple,
         allowSuggestions,
-        options: options.map((o) => o.trim()).filter(Boolean),
+        options: options
+          .filter((o) => o.label.trim())
+          .map((o) => ({ label: o.label.trim(), url: o.url.trim() || null })),
       });
       await onDone(true);
     } catch (err) {
@@ -118,15 +142,26 @@ function NewPollForm({
       <div className="poll-new-options">
         <span className="label-text">Options</span>
         {options.map((o, i) => (
-          <input
-            key={i}
-            value={o}
-            onChange={(e) => setOption(i, e.target.value)}
-            placeholder={i === 0 ? 'e.g. Pizza Palace' : 'Add another option'}
-            maxLength={200}
-          />
+          <div className="option-row" key={i}>
+            <input
+              value={o.label}
+              onChange={(e) => setOption(i, 'label', e.target.value)}
+              placeholder={i === 0 ? 'e.g. Pizza Palace' : 'Add another option'}
+              maxLength={200}
+              aria-label={`Option ${i + 1}`}
+            />
+            <input
+              value={o.url}
+              onChange={(e) => setOption(i, 'url', e.target.value)}
+              placeholder="Link (optional)"
+              inputMode="url"
+              maxLength={2000}
+              aria-label={`Option ${i + 1} link`}
+              required={!!o.url.trim() && !o.label.trim()}
+            />
+          </div>
         ))}
-        <p className="hint">You can leave this empty and let people suggest options.</p>
+        <p className="hint">Links can point to a map, menu or website. You can also leave this empty and let people suggest options.</p>
       </div>
       <label className="check">
         <input type="checkbox" checked={multiple} onChange={(e) => setMultiple(e.target.checked)} />
@@ -170,7 +205,10 @@ function PollCard({
   // Optimistic copy of my votes while a save is in flight.
   const [pendingVotes, setPendingVotes] = useState<string[] | null>(null);
   const [suggestion, setSuggestion] = useState('');
+  const [suggestionUrl, setSuggestionUrl] = useState('');
   const [adding, setAdding] = useState(false);
+  // Option whose link is being edited, and the draft value.
+  const [editingLink, setEditingLink] = useState<{ id: string; url: string } | null>(null);
 
   const serverVotes = poll.options.filter((o) => o.voters.some((v) => v.id === userId)).map((o) => o.id);
   const myVotes = pendingVotes ?? serverVotes;
@@ -219,8 +257,9 @@ function PollCard({
     if (!label) return;
     setAdding(true);
     try {
-      const { id } = await api.addOption(poll.id, label);
+      const { id } = await api.addOptionWithUrl(poll.id, label, suggestionUrl.trim() || null);
       setSuggestion('');
+      setSuggestionUrl('');
       // Suggesting something counts as a vote for it (single-choice polls keep your existing vote).
       if (poll.multiple || !myVotes.length) await api.setVotes(poll.id, poll.multiple ? [...myVotes, id] : [id]);
       await onChanged();
@@ -277,6 +316,7 @@ function PollCard({
           ];
           return (
             <li key={o.id} className={`poll-option ${mine ? 'mine' : ''} ${top ? 'top' : ''}`}>
+              <div className="poll-option-line">
               <button
                 type="button"
                 className="poll-option-main"
@@ -305,6 +345,17 @@ function PollCard({
                 {top && <span className="badge badge-free">{topLabel}</span>}
                 <span className="poll-count">{count}</span>
               </button>
+              {o.canEdit && !locked && (
+                <button
+                  type="button"
+                  className="poll-icon-btn"
+                  title={o.url ? 'Change link' : 'Add a link'}
+                  aria-label={o.url ? `Change link for ${o.label}` : `Add a link to ${o.label}`}
+                  onClick={() => setEditingLink(editingLink?.id === o.id ? null : { id: o.id, url: o.url ?? '' })}
+                >
+                  🔗
+                </button>
+              )}
               {o.canDelete && !locked && (
                 <button
                   type="button"
@@ -315,6 +366,41 @@ function PollCard({
                 >
                   ×
                 </button>
+              )}
+              </div>
+              {o.url && editingLink?.id !== o.id && <OptionLink url={o.url} />}
+              {editingLink?.id === o.id && (
+                <form
+                  className="poll-link-edit"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const url = editingLink.url.trim() || null;
+                    void run(() => api.setOptionUrl(poll.id, o.id, url)).then(() => setEditingLink(null));
+                  }}
+                >
+                  <input
+                    value={editingLink.url}
+                    onChange={(e) => setEditingLink({ id: o.id, url: e.target.value })}
+                    placeholder="https://maps.example.com/…"
+                    inputMode="url"
+                    maxLength={2000}
+                    autoFocus
+                    aria-label={`Link for ${o.label}`}
+                  />
+                  <button className="btn btn-sm btn-primary">Save</button>
+                  {o.url && (
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => void run(() => api.setOptionUrl(poll.id, o.id, null)).then(() => setEditingLink(null))}
+                    >
+                      Remove link
+                    </button>
+                  )}
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => setEditingLink(null)}>
+                    Cancel
+                  </button>
+                </form>
               )}
             </li>
           );
@@ -328,6 +414,15 @@ function PollCard({
             onChange={(e) => setSuggestion(e.target.value)}
             placeholder={canManage && !poll.allowSuggestions ? 'Add an option' : 'Suggest something else…'}
             maxLength={200}
+            aria-label="New option"
+          />
+          <input
+            value={suggestionUrl}
+            onChange={(e) => setSuggestionUrl(e.target.value)}
+            placeholder="Link (optional)"
+            inputMode="url"
+            maxLength={2000}
+            aria-label="New option link"
           />
           <button className="btn" disabled={adding || !suggestion.trim()}>
             Add

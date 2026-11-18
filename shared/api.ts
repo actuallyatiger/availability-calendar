@@ -65,10 +65,13 @@ export interface EventDetail extends EventSummary {
 export interface PollOption {
   id: string;
   label: string;
+  url: string | null;
   createdBy: UserSummary;
   voters: UserSummary[];
   /** True if the current user may remove this option. */
   canDelete: boolean;
+  /** True if the current user may change this option's link. */
+  canEdit: boolean;
 }
 
 export interface Poll {
@@ -87,7 +90,13 @@ export interface PollInput {
   question: string;
   multiple: boolean;
   allowSuggestions: boolean;
-  options: string[];
+  options: PollOptionInput[];
+}
+
+export interface PollOptionInput {
+  label: string;
+  /** Optional link; "https://" is added if no scheme is given. */
+  url?: string | null;
 }
 
 export interface PollUpdate {

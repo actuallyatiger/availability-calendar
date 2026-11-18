@@ -50,6 +50,10 @@ export const api = {
   updatePoll: (pollId: string, update: PollUpdate) => request<{ ok: true }>('PATCH', `/api/polls/${pollId}`, update),
   deletePoll: (pollId: string) => request<{ ok: true }>('DELETE', `/api/polls/${pollId}`),
   addOption: (pollId: string, label: string) => request<{ id: string }>('POST', `/api/polls/${pollId}/options`, { label }),
+  addOptionWithUrl: (pollId: string, label: string, url: string | null) =>
+    request<{ id: string }>('POST', `/api/polls/${pollId}/options`, { label, url }),
+  setOptionUrl: (pollId: string, optionId: string, url: string | null) =>
+    request<{ ok: true }>('PATCH', `/api/polls/${pollId}/options/${optionId}`, { url }),
   deleteOption: (pollId: string, optionId: string) =>
     request<{ ok: true }>('DELETE', `/api/polls/${pollId}/options/${optionId}`),
   setVotes: (pollId: string, optionIds: string[]) => request<{ ok: true }>('PUT', `/api/polls/${pollId}/votes`, { optionIds }),
