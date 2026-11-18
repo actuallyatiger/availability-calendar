@@ -91,6 +91,8 @@ export interface PollOptionTable {
   label: string;
   /** Display order within the poll. */
   position: number;
+  /** Optional http(s) link, e.g. a map or menu. */
+  url: string | null;
   created_by: string;
   created_at: string;
 }

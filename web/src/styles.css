@@ -943,3 +943,68 @@ fieldset > .row + label {
   flex: 1;
   min-width: 0;
 }
+
+/* poll option links */
+.option-row {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 0.4rem;
+}
+.poll-option {
+  display: block;
+}
+.poll-option-line {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+.poll-link {
+  display: inline-flex;
+  max-width: calc(100% - 2.75rem);
+  margin: 0.2rem 0 0 2.75rem;
+  font-size: 0.82rem;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.poll-link:hover .poll-link-host {
+  text-decoration: underline;
+}
+.poll-link-host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.poll-icon-btn {
+  flex: none;
+  width: 2rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  opacity: 0.6;
+}
+.poll-icon-btn:hover {
+  opacity: 1;
+  border-color: var(--border);
+}
+.poll-link-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.2rem 2.75rem;
+}
+.poll-link-edit input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.poll-suggest {
+  flex-wrap: wrap;
+}
+.poll-suggest input {
+  flex: 1 1 10rem;
+}
+@media (max-width: 600px) {
+  .option-row {
+    grid-template-columns: 1fr;
+  }
+}

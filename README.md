@@ -14,7 +14,9 @@ group view shows a live heatmap and the best time slots.
   which moves it to the archive (it can be reopened).
 - **Polls**: the organiser can add polls to an event (e.g. "Where should we
   eat?"), as pick-one or pick-any. Everyone can vote and, if allowed, suggest
-  their own options (suggesting something also votes for it). People can
+  their own options (suggesting something also votes for it). Options can
+  carry an optional link (map, menu, website); only http(s) links are
+  accepted and `https://` is added if missing. People can
   remove their own suggestions until someone else votes for them; the
   organiser can close, reopen or delete polls and remove any option.
 - **Live updates** over Server-Sent Events. Lists and grids refresh as others
