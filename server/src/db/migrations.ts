@@ -83,6 +83,50 @@ const migrations: Record<string, Migration> = {
       }
     },
   },
+
+  '0002_polls': {
+    async up(db: Kysely<any>) {
+      await db.schema
+        .createTable('polls')
+        .addColumn('id', 'text', (c) => c.primaryKey())
+        .addColumn('event_id', 'text', (c) => c.notNull().references('events.id').onDelete('cascade'))
+        .addColumn('question', 'text', (c) => c.notNull())
+        // Booleans are stored as 0/1 integers for portability.
+        .addColumn('multiple', 'integer', (c) => c.notNull().defaultTo(1))
+        .addColumn('allow_suggestions', 'integer', (c) => c.notNull().defaultTo(1))
+        .addColumn('closed', 'integer', (c) => c.notNull().defaultTo(0))
+        .addColumn('created_by', 'text', (c) => c.notNull().references('users.id'))
+        .addColumn('created_at', 'text', (c) => c.notNull())
+        .execute();
+      await db.schema.createIndex('polls_event_idx').on('polls').column('event_id').execute();
+
+      await db.schema
+        .createTable('poll_options')
+        .addColumn('id', 'text', (c) => c.primaryKey())
+        .addColumn('poll_id', 'text', (c) => c.notNull().references('polls.id').onDelete('cascade'))
+        .addColumn('label', 'text', (c) => c.notNull())
+        .addColumn('position', 'integer', (c) => c.notNull())
+        .addColumn('created_by', 'text', (c) => c.notNull().references('users.id'))
+        .addColumn('created_at', 'text', (c) => c.notNull())
+        .execute();
+      await db.schema.createIndex('poll_options_poll_idx').on('poll_options').column('poll_id').execute();
+
+      await db.schema
+        .createTable('poll_votes')
+        .addColumn('poll_id', 'text', (c) => c.notNull().references('polls.id').onDelete('cascade'))
+        .addColumn('option_id', 'text', (c) => c.notNull().references('poll_options.id').onDelete('cascade'))
+        .addColumn('user_id', 'text', (c) => c.notNull().references('users.id').onDelete('cascade'))
+        .addColumn('created_at', 'text', (c) => c.notNull())
+        .addPrimaryKeyConstraint('poll_votes_pk', ['option_id', 'user_id'])
+        .execute();
+      await db.schema.createIndex('poll_votes_poll_idx').on('poll_votes').column('poll_id').execute();
+    },
+    async down(db: Kysely<any>) {
+      for (const t of ['poll_votes', 'poll_options', 'polls']) {
+        await db.schema.dropTable(t).ifExists().execute();
+      }
+    },
+  },
 };
 
 export const migrationProvider: MigrationProvider = {

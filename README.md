@@ -12,6 +12,11 @@ group view shows a live heatmap and the best time slots.
   people and/or groups (from the OIDC `groups` claim).
 - **Archive**: the creator marks an event as *happened* or *didn't happen*,
   which moves it to the archive (it can be reopened).
+- **Polls**: the organiser can add polls to an event (e.g. "Where should we
+  eat?"), as pick-one or pick-any. Everyone can vote and, if allowed, suggest
+  their own options (suggesting something also votes for it). People can
+  remove their own suggestions until someone else votes for them; the
+  organiser can close, reopen or delete polls and remove any option.
 - **Live updates** over Server-Sent Events. Lists and grids refresh as others
   respond.
 - **SQLite by default, PostgreSQL optional**: same code and migrations for both.
@@ -111,7 +116,7 @@ server/src/
   auth.ts           OIDC (openid-client) + dev login, DB-backed sessions, CSRF origin check
   access.ts         who can view/manage an event
   bus.ts            in-process change bus feeding SSE
-  routes/           events, availability, users/groups, SSE stream
+  routes/           events, availability, polls, users/groups, SSE stream
   db/               Kysely setup (SQLite/Postgres), schema types, migrations
 shared/             types + date/slot helpers used by both server and web
 web/src/            React SPA (Vite)

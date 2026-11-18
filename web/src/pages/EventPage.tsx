@@ -9,6 +9,7 @@ import { cellKey } from '../components/Grid';
 import { MyAvailability, type Brush } from '../components/MyAvailability';
 import { aggregate, BestTimes, CellDetails, GroupAvailability } from '../components/GroupAvailability';
 import { StatusBadge } from './EventListPage';
+import { Polls } from '../components/Polls';
 
 type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
@@ -307,6 +308,17 @@ export function EventPage() {
           )}
         </section>
       </div>
+
+      <Polls
+        eventId={id}
+        polls={event.polls}
+        userId={user.id}
+        organizerId={event.createdBy.id}
+        canManage={event.canManage}
+        readOnly={archived}
+        onChanged={load}
+        onError={setError}
+      />
     </div>
   );
 }

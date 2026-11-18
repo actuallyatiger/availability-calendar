@@ -3,6 +3,8 @@ import type {
   EventDetail,
   EventInput,
   EventSummary,
+  PollInput,
+  PollUpdate,
   SessionResponse,
   UserSummary,
 } from '../../shared/api';
@@ -43,4 +45,12 @@ export const api = {
   reopenEvent: (id: string) => request<{ ok: true }>('POST', `/api/events/${encodeURIComponent(id)}/reopen`, {}),
   setAvailability: (id: string, cells: AvailabilityCellInput[]) =>
     request<{ ok: true }>('PUT', `/api/events/${encodeURIComponent(id)}/availability`, { cells }),
+  createPoll: (eventId: string, input: PollInput) =>
+    request<{ id: string }>('POST', `/api/events/${encodeURIComponent(eventId)}/polls`, input),
+  updatePoll: (pollId: string, update: PollUpdate) => request<{ ok: true }>('PATCH', `/api/polls/${pollId}`, update),
+  deletePoll: (pollId: string) => request<{ ok: true }>('DELETE', `/api/polls/${pollId}`),
+  addOption: (pollId: string, label: string) => request<{ id: string }>('POST', `/api/polls/${pollId}/options`, { label }),
+  deleteOption: (pollId: string, optionId: string) =>
+    request<{ ok: true }>('DELETE', `/api/polls/${pollId}/options/${optionId}`),
+  setVotes: (pollId: string, optionIds: string[]) => request<{ ok: true }>('PUT', `/api/polls/${pollId}/votes`, { optionIds }),
 };

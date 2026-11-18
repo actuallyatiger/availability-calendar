@@ -72,6 +72,36 @@ export interface AvailabilityTable {
   updated_at: string;
 }
 
+export interface PollTable {
+  id: string;
+  event_id: string;
+  question: string;
+  /** 1 = voters may pick several options, 0 = pick one. */
+  multiple: number;
+  /** 1 = anyone who can see the event may add options. */
+  allow_suggestions: number;
+  closed: number;
+  created_by: string;
+  created_at: string;
+}
+
+export interface PollOptionTable {
+  id: string;
+  poll_id: string;
+  label: string;
+  /** Display order within the poll. */
+  position: number;
+  created_by: string;
+  created_at: string;
+}
+
+export interface PollVoteTable {
+  poll_id: string;
+  option_id: string;
+  user_id: string;
+  created_at: string;
+}
+
 export interface Database {
   users: UserTable;
   sessions: SessionTable;
@@ -79,6 +109,9 @@ export interface Database {
   event_invitees: EventInviteeTable;
   event_groups: EventGroupTable;
   availability: AvailabilityTable;
+  polls: PollTable;
+  poll_options: PollOptionTable;
+  poll_votes: PollVoteTable;
 }
 
 export type User = Selectable<UserTable>;

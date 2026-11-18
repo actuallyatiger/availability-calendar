@@ -4,7 +4,7 @@ import { sql } from 'kysely';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createDb, migrateToLatest } from './db/index.js';
-import type { EventDetail, EventInput, EventSummary } from '../../shared/api.js';
+import type { EventDetail, EventInput, EventSummary, Poll } from '../../shared/api.js';
 
 let app: FastifyInstance;
 const cookies: Record<string, string> = {};
@@ -191,6 +191,87 @@ describe('events', () => {
     expect((await as('bob', 'DELETE', `/api/events/${ids.restricted}`)).statusCode).toBe(403);
     expect((await as('alice', 'DELETE', `/api/events/${ids.restricted}`)).statusCode).toBe(200);
     expect((await as('alice', 'GET', `/api/events/${ids.restricted}`)).statusCode).toBe(404);
+  });
+});
+
+describe('polls', () => {
+  const polls = async (u: string) => ((await as(u, 'GET', `/api/events/${ids.public}`)).json() as EventDetail).polls;
+  let poll: Poll;
+
+  it('lets only the event creator create polls', async () => {
+    const body = { question: 'Where to eat?', multiple: true, allowSuggestions: true, options: ['Pizza', 'Sushi', 'pizza '] };
+    expect((await as('bob', 'POST', `/api/events/${ids.public}/polls`, body)).statusCode).toBe(403);
+    expect((await as('alice', 'POST', `/api/events/${ids.public}/polls`, body)).statusCode).toBe(201);
+    [poll] = (await polls('bob')) as [Poll];
+    expect(poll.question).toBe('Where to eat?');
+    expect(poll.options.map((o) => o.label)).toEqual(['Pizza', 'Sushi']); // duplicate dropped
+    const list = (await as('bob', 'GET', '/api/events')).json() as EventSummary[];
+    expect(list.find((e) => e.id === ids.public)!.pollCount).toBe(1);
+  });
+
+  it('accepts suggestions and rejects duplicates', async () => {
+    expect((await as('carol', 'POST', `/api/polls/${poll.id}/options`, { label: 'Tacos' })).statusCode).toBe(201);
+    expect((await as('bob', 'POST', `/api/polls/${poll.id}/options`, { label: '  tacos ' })).statusCode).toBe(409);
+    poll = (await polls('carol'))[0]!;
+    const tacos = poll.options.find((o) => o.label === 'Tacos')!;
+    expect(tacos.createdBy.name).toBe('carol');
+    expect(tacos.canDelete).toBe(true);
+  });
+
+  it('records votes, replacing previous ones', async () => {
+    const [pizza, sushi, tacos] = poll.options.map((o) => o.id) as [string, string, string];
+    expect((await as('bob', 'PUT', `/api/polls/${poll.id}/votes`, { optionIds: [pizza, tacos] })).statusCode).toBe(200);
+    expect((await as('carol', 'PUT', `/api/polls/${poll.id}/votes`, { optionIds: [tacos] })).statusCode).toBe(200);
+    expect((await as('bob', 'PUT', `/api/polls/${poll.id}/votes`, { optionIds: [sushi, tacos] })).statusCode).toBe(200);
+    expect((await as('bob', 'PUT', `/api/polls/${poll.id}/votes`, { optionIds: ['nope'] })).statusCode).toBe(400);
+    const p = (await polls('alice'))[0]!;
+    const votes = Object.fromEntries(p.options.map((o) => [o.label, o.voters.map((v) => v.name).sort()]));
+    expect(votes).toEqual({ Pizza: [], Sushi: ['bob'], Tacos: ['bob', 'carol'] });
+    expect(p.voterCount).toBe(2);
+  });
+
+  it('only lets authors remove suggestions nobody else voted for', async () => {
+    const tacos = poll.options.find((o) => o.label === 'Tacos')!;
+    // bob voted for carol's suggestion, so carol can no longer remove it...
+    expect((await as('carol', 'DELETE', `/api/polls/${poll.id}/options/${tacos.id}`)).statusCode).toBe(403);
+    expect((await polls('carol'))[0]!.options.find((o) => o.id === tacos.id)!.canDelete).toBe(false);
+    // ...but the event creator can remove anything.
+    const pizza = poll.options.find((o) => o.label === 'Pizza')!;
+    expect((await as('alice', 'DELETE', `/api/polls/${poll.id}/options/${pizza.id}`)).statusCode).toBe(200);
+    expect((await polls('alice'))[0]!.options.map((o) => o.label)).toEqual(['Sushi', 'Tacos']);
+  });
+
+  it('trims to one vote per person when switching to single choice', async () => {
+    expect((await as('alice', 'PATCH', `/api/polls/${poll.id}`, { multiple: false })).statusCode).toBe(200);
+    const p = (await polls('alice'))[0]!;
+    expect(p.multiple).toBe(false);
+    expect(p.options.flatMap((o) => o.voters).filter((v) => v.name === 'bob')).toHaveLength(1);
+    const [sushi, tacos] = p.options.map((o) => o.id);
+    expect((await as('bob', 'PUT', `/api/polls/${poll.id}/votes`, { optionIds: [sushi, tacos] })).statusCode).toBe(400);
+  });
+
+  it('closes polls and disallows suggestions when turned off', async () => {
+    await as('alice', 'PATCH', `/api/polls/${poll.id}`, { allowSuggestions: false });
+    expect((await as('bob', 'POST', `/api/polls/${poll.id}/options`, { label: 'Curry' })).statusCode).toBe(403);
+    expect((await as('alice', 'POST', `/api/polls/${poll.id}/options`, { label: 'Curry' })).statusCode).toBe(201);
+    await as('alice', 'PATCH', `/api/polls/${poll.id}`, { closed: true });
+    expect((await as('bob', 'PUT', `/api/polls/${poll.id}/votes`, { optionIds: [] })).statusCode).toBe(409);
+    await as('alice', 'PATCH', `/api/polls/${poll.id}`, { closed: false });
+  });
+
+  it('makes polls read-only on archived events and hides them from outsiders', async () => {
+    await as('alice', 'POST', `/api/events/${ids.public}/archive`, { outcome: 'happened' });
+    expect((await as('bob', 'PUT', `/api/polls/${poll.id}/votes`, { optionIds: [] })).statusCode).toBe(409);
+    await as('alice', 'POST', `/api/events/${ids.public}/reopen`);
+
+    const res = await as('alice', 'POST', '/api/events', { ...baseEvent, title: 'Private', visibility: 'restricted' });
+    const privateId = res.json().id;
+    await as('alice', 'POST', `/api/events/${privateId}/polls`, { question: 'Q', multiple: true, allowSuggestions: true, options: ['A'] });
+    const p = ((await as('alice', 'GET', `/api/events/${privateId}`)).json() as EventDetail).polls[0]!;
+    expect((await as('carol', 'PUT', `/api/polls/${p.id}/votes`, { optionIds: [p.options[0]!.id] })).statusCode).toBe(404);
+    // Deleting the event removes its polls too.
+    expect((await as('alice', 'DELETE', `/api/events/${privateId}`)).statusCode).toBe(200);
+    expect((await as('alice', 'PATCH', `/api/polls/${p.id}`, { closed: true })).statusCode).toBe(404);
   });
 });
 

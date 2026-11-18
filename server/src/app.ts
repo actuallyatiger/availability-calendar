@@ -10,6 +10,7 @@ import { registerAuth } from './auth.js';
 import { registerEventRoutes } from './routes/events.js';
 import { registerUserRoutes } from './routes/users.js';
 import { registerStreamRoute } from './routes/stream.js';
+import { registerPollRoutes } from './routes/polls.js';
 
 export interface AppOptions {
   config: Config;
@@ -30,6 +31,7 @@ export async function buildApp({ config, db, logger = true }: AppOptions): Promi
   await registerAuth(app, config, db.db);
   await registerUserRoutes(app, db.db);
   await registerEventRoutes(app, db.db, bus);
+  await registerPollRoutes(app, db.db, bus);
   await registerStreamRoute(app, bus);
 
   app.get('/api/health', async () => {
