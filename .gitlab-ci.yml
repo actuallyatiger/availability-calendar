@@ -1,0 +1,54 @@
+# Pipelines run for merge requests, the default branch and tags
+# (and not twice for a branch that has an open merge request).
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+stages:
+  - test
+  - build
+
+test:
+  stage: test
+  image: node:22-bookworm-slim
+  services:
+    - name: postgres:17-alpine
+      alias: postgres
+  variables:
+    POSTGRES_PASSWORD: test
+    npm_config_cache: $CI_PROJECT_DIR/.npm
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
+  script:
+    # better-sqlite3 ships prebuilt binaries, so install scripts aren't needed.
+    - npm ci --ignore-scripts
+    - npm run typecheck
+    - npm test
+    - TEST_DATABASE_URL=postgres://postgres:test@postgres:5432/postgres npm test
+    - npm run build
+
+# Builds the image and pushes it to this project's container registry.
+# Needs the container registry enabled and a runner that allows Docker-in-Docker
+# (privileged = true in the runner's config.toml).
+docker:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: /certs
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" -t "$CI_REGISTRY_IMAGE:${CI_COMMIT_TAG:-latest}" .
+    - docker push --all-tags "$CI_REGISTRY_IMAGE"

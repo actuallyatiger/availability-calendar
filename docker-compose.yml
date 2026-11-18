@@ -1,0 +1,17 @@
+# Default: single container with SQLite stored in a named volume.
+# For PostgreSQL:  docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+services:
+  app:
+    build: .
+    image: availability-calendar:latest
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file: .env
+    environment:
+      PORT: 3000
+    volumes:
+      - app-data:/data
+
+volumes:
+  app-data:
